@@ -5,18 +5,20 @@ F405 stack). It's being built sprint by sprint: this repo starts as a plain
 software foundation, with computer vision, ROS 2, SLAM, and autonomous
 navigation layered in over future sprints.
 
-## Stack (Sprint 1 decisions)
+## Stack
 
 | Layer            | Choice                                   | Status        |
 |-------------------|-------------------------------------------|---------------|
 | OS                | Windows 11 host + WSL2 (Ubuntu 22.04 LTS) | active        |
-| ROS 2             | Humble Hawksbill                          | not installed yet |
+| ROS 2             | Humble Hawksbill (Desktop)                | active        |
 | Language          | Python 3.10+                              | active        |
 | Simulation        | Gazebo (paired with Humble)               | not installed yet |
 | Flight control    | TBD (Betaflight vs. ArduPilot/PX4)        | open decision |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the reasoning behind
-each choice, and [docs/ROADMAP.md](docs/ROADMAP.md) for what's planned next.
+each choice, [docs/ROS2_CONVENTIONS.md](docs/ROS2_CONVENTIONS.md) for the ROS 2
+package/topic/message conventions, and [docs/ROADMAP.md](docs/ROADMAP.md) for
+what's planned next.
 
 ## Development process
 
@@ -36,3 +38,18 @@ pip install -e ".[dev]"
 wiz              # run the entry point
 pytest           # run the test suite
 ```
+
+### ROS 2
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/Wiz/ros2_ws
+colcon build --symlink-install
+source install/setup.bash
+
+ros2 launch wiz_bringup wiz_bringup.launch.py   # run both nodes together
+colcon test --packages-select wiz_status --event-handlers console_direct+
+```
+
+See [docs/ROS2_CONVENTIONS.md](docs/ROS2_CONVENTIONS.md) for topics, message
+shapes, and conventions.

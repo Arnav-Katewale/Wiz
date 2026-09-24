@@ -1,18 +1,20 @@
 # Wiz Architecture
 
-Status: Sprint 1 (foundation). Most subsystems below are documented decisions,
-not yet implemented — they land in later sprints.
+Status: Sprint 2 (ROS 2 communication framework). Subsystems marked "not yet
+implemented" below still land in later sprints.
 
 ## Host & OS
 - Host: Windows 11
 - Dev/runtime OS: Ubuntu 22.04 LTS (Jammy) via WSL2. ROS 2 and its tooling are
   Linux-first; WSLg provides GUI passthrough on this Windows 11 host for
-  later simulation/visualization tools (RViz, Gazebo).
+  simulation/visualization tools (RViz2 is installed; not yet used in a
+  sprint).
 
 ## ROS 2 Distribution
-- ROS 2 Humble Hawksbill — the LTS release matched to Ubuntu 22.04 (supported
-  through May 2027). Not installed yet; arrives in the ROS 2 integration
-  sprint.
+- ROS 2 Humble Hawksbill (Desktop variant — includes RViz2), installed in
+  Sprint 2 via the official apt repo. Matches Ubuntu 22.04, supported through
+  May 2027. Workspace lives at `ros2_ws/`; see docs/ROS2_CONVENTIONS.md for
+  package layout, topics, and message conventions.
 
 ## Programming Languages
 - Python 3.10+ is the primary language (perception, planning, tooling, node
@@ -49,14 +51,18 @@ TBD — not required for Sprint 1 (software-only foundation).
 ## Repository Layout
 ```
 Wiz/
-├── src/wiz/            Python package
-│   ├── main.py         entry point (`wiz` console script)
-│   ├── cv/              computer vision (empty - future sprint)
-│   ├── navigation/       navigation/planning (empty - future sprint)
-│   ├── simulation/       sim integration code (empty - future sprint)
-│   └── config/           config-loading helpers (empty - future sprint)
-├── config/              runtime config files (YAML)
-├── ros2_ws/             reserved colcon workspace for ROS 2 packages
-├── tests/               pytest test suite
-└── docs/                architecture, roadmap
+├── src/wiz/                     Python package (Sprint 1, unchanged)
+│   ├── main.py                  entry point (`wiz` console script)
+│   ├── cv/                       computer vision (empty - future sprint)
+│   ├── navigation/                navigation/planning (empty - future sprint)
+│   ├── simulation/                sim integration code (empty - future sprint)
+│   └── config/                    config-loading helpers (empty - future sprint)
+├── config/                      runtime config files (YAML)
+├── ros2_ws/                     colcon workspace for ROS 2 packages
+│   └── src/
+│       ├── wiz_interfaces/       custom .msg definitions (ament_cmake)
+│       ├── wiz_status/            status publisher/subscriber nodes + tests
+│       └── wiz_bringup/           launch files
+├── tests/                       pytest test suite (src/wiz only)
+└── docs/                        architecture, roadmap, ROS 2 conventions
 ```
