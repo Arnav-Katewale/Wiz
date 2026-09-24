@@ -1,0 +1,6 @@
+drone:
+  name: wiz-01
+  platform: speedybee-f405
+
+logging:
+  level: INFO

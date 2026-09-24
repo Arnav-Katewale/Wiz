@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wiz"
+version = "0.1.0"
+description = "Wiz - autonomous drone project"
+requires-python = ">=3.10"
+readme = "README.md"
+
+[project.scripts]
+wiz = "wiz.main:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
