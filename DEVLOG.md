@@ -82,3 +82,76 @@ flight-control decision below).
 
 **Next candidates:** see docs/ROADMAP.md. Waiting on go-ahead before starting
 any further sprint.
+
+## Sprint 3 — Computer Vision & Camera Processing
+**Date:** 2026-09-24
+**Deliverable:** Wiz v0.3 — Computer Vision Pipeline
+
+**Objective:** Enable Wiz to process camera images and extract useful visual
+information, published through ROS 2.
+
+**Key decision:** detection method was left up to hardware capability. This
+machine (13th-gen i9, 24C/32T, 32GB RAM) comfortably handles CPU inference of
+a lightweight pretrained detector, so the pipeline uses a real pretrained
+model (MobileNet-SSD, VOC classes) instead of pure classical/motion-based
+detection, while still keeping classical ORB feature detection as a separate
+stage per the task breakdown.
+
+**Done:**
+- New `wiz_vision` package (`ros2_ws/src/wiz_vision/`):
+  - `camera_node`: publishes `/wiz/camera/raw`. Source is configurable
+    (`source_type`: `synthetic` default | `file` | `webcam`); synthetic mode
+    needs no external file and always works.
+  - `vision_node`: subscribes to raw frames, runs preprocessing (grayscale +
+    blur), ORB feature detection, MobileNet-SSD object detection (Caffe,
+    OpenCV DNN module, VOC0712 classes), and a centroid tracker that assigns
+    persistent IDs across frames. Publishes annotated frames
+    (`/wiz/camera/annotated`) and structured results
+    (`/wiz/vision/detections`, new `Detection`/`DetectionArray` messages in
+    `wiz_interfaces`).
+- Model weights (23MB, MIT licensed, chuanqi305/MobileNet-SSD) are fetched by
+  `scripts/download_vision_models.sh` rather than committed to git;
+  `vision_node` degrades gracefully (logs an error, skips detection, still
+  publishes features/topics) if they're missing.
+- `wiz_bringup`: added `vision.launch.py` (camera+vision) and `all.launch.py`
+  (status+vision together).
+- Real error handling: cv_bridge conversion failures are caught and logged
+  rather than crashing the node; a missing model is logged, not fatal.
+- Updated docs/ROS2_CONVENTIONS.md with the new topics/messages, model setup
+  step, and visualization instructions (`rqt_image_view` via WSLg).
+
+**Tested:**
+- `colcon build` — all 4 packages (incl. new `wiz_vision`) build clean.
+- `colcon test --packages-select wiz_vision` — 11/11 pytest cases pass:
+  preprocessing shape/dtype, ORB finds features on a textured image and none
+  on a blank one, centroid tracker (registration, ID persistence while
+  moving, drop-after-disappeared, multiple simultaneous objects), missing-
+  model error handling, and a full rclpy integration test that runs
+  camera_node + vision_node together and checks real topic output.
+- **Semantic correctness**, not just plumbing: ran the detector on a real
+  sample photo (`test/fixtures/sample_person.jpg`, a Pascal VOC image) and
+  confirmed it correctly finds `person` at ~1.00 confidence — asserted in
+  `test_detect_objects_finds_person_in_sample_image` and additionally
+  eyeballed by rendering the annotated output to PNG and viewing it directly:
+  correct bounding box, label, and ORB keypoints landing on actual texture
+  (eyes, hair, jacket embroidery).
+- Ran `ros2 launch wiz_bringup vision.launch.py` live: both nodes start,
+  `/wiz/camera/annotated` publishes 640x480 bgr8 at ~12 Hz,
+  `/wiz/vision/detections` publishes per frame (empty on the synthetic
+  source, as expected — a plain circle isn't a VOC class).
+
+**Open issues / risks:**
+- `vision_node` processing time (ORB + DNN forward pass, ~80ms/frame) is
+  close to camera_node's 15 Hz publish period, so the effective annotated
+  rate is ~12 Hz and could lag further under sustained load. Fine for this
+  sprint; worth revisiting (e.g. throttle camera rate, or process every Nth
+  frame) if a later sprint needs tighter real-time behavior.
+- `webcam` source mode is implemented but untested — WSL2 has no camera
+  passthrough by default (would need `usbipd-win`), carried over as a noted
+  limitation rather than solved here.
+- Detector is a fixed pretrained model (VOC 2007, 20 classes) — no
+  fine-tuning/training pipeline, by design for an "initial algorithm."
+- Flight-control stack and LICENSE choice still open (carried over).
+
+**Next candidates:** see docs/ROADMAP.md. Waiting on go-ahead before starting
+any further sprint.

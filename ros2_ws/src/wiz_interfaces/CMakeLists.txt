@@ -10,6 +10,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SystemHealth.msg"
   "msg/Telemetry.msg"
   "msg/SensorReading.msg"
+  "msg/Detection.msg"
+  "msg/DetectionArray.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

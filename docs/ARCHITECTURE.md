@@ -53,16 +53,25 @@ TBD — not required for Sprint 1 (software-only foundation).
 Wiz/
 ├── src/wiz/                     Python package (Sprint 1, unchanged)
 │   ├── main.py                  entry point (`wiz` console script)
-│   ├── cv/                       computer vision (empty - future sprint)
+│   ├── cv/                       still empty - real CV lives in ros2_ws/src/wiz_vision
 │   ├── navigation/                navigation/planning (empty - future sprint)
 │   ├── simulation/                sim integration code (empty - future sprint)
 │   └── config/                    config-loading helpers (empty - future sprint)
 ├── config/                      runtime config files (YAML)
+├── models/                      downloaded model weights (gitignored, see scripts/)
+├── scripts/
+│   └── download_vision_models.sh   fetches MobileNet-SSD weights
 ├── ros2_ws/                     colcon workspace for ROS 2 packages
 │   └── src/
 │       ├── wiz_interfaces/       custom .msg definitions (ament_cmake)
 │       ├── wiz_status/            status publisher/subscriber nodes + tests
+│       ├── wiz_vision/            camera capture + CV processing nodes + tests
 │       └── wiz_bringup/           launch files
 ├── tests/                       pytest test suite (src/wiz only)
 └── docs/                        architecture, roadmap, ROS 2 conventions
 ```
+
+Note: `src/wiz/cv/` was reserved in Sprint 1 as a placeholder but is intentionally
+still empty — the actual computer-vision implementation (Sprint 3) is a ROS 2
+package (`ros2_ws/src/wiz_vision/`), consistent with how Sprint 2's status
+nodes also live under `ros2_ws/` rather than in `src/wiz/`.

@@ -12,6 +12,7 @@ navigation layered in over future sprints.
 | OS                | Windows 11 host + WSL2 (Ubuntu 22.04 LTS) | active        |
 | ROS 2             | Humble Hawksbill (Desktop)                | active        |
 | Language          | Python 3.10+                              | active        |
+| Computer vision   | OpenCV (ORB features + MobileNet-SSD)     | active        |
 | Simulation        | Gazebo (paired with Humble)               | not installed yet |
 | Flight control    | TBD (Betaflight vs. ArduPilot/PX4)        | open decision |
 
@@ -53,3 +54,21 @@ colcon test --packages-select wiz_status --event-handlers console_direct+
 
 See [docs/ROS2_CONVENTIONS.md](docs/ROS2_CONVENTIONS.md) for topics, message
 shapes, and conventions.
+
+### Computer vision
+
+One-time setup (downloads the ~23MB MobileNet-SSD model, not committed to git):
+```bash
+bash scripts/download_vision_models.sh
+```
+
+Run it:
+```bash
+ros2 launch wiz_bringup vision.launch.py          # camera + vision only
+ros2 launch wiz_bringup all.launch.py             # status + vision together
+ros2 run rqt_image_view rqt_image_view /wiz/camera/annotated   # view it (WSLg)
+```
+
+Defaults to a synthetic test pattern; pass `source_type:=file
+source_path:=/path/to/video.mp4` to run it against a real video. See
+[docs/ROS2_CONVENTIONS.md](docs/ROS2_CONVENTIONS.md) for details.
