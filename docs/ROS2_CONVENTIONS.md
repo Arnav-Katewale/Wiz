@@ -30,6 +30,7 @@ colcon test --packages-select wiz_status --event-handlers console_direct+
 | `wiz_interfaces`  | ament_cmake   | Custom `.msg` definitions                         |
 | `wiz_status`      | ament_python  | `status_publisher`, `status_subscriber` nodes + tests |
 | `wiz_vision`      | ament_python  | `camera_node`, `vision_node` (OpenCV CV pipeline) + tests |
+| `wiz_terrain`     | ament_python  | `terrain_node` (traversability grid) + tests      |
 | `wiz_bringup`     | ament_cmake   | Launch files                                      |
 
 ### Vision pipeline setup
@@ -84,6 +85,8 @@ All Wiz topics are namespaced under `/wiz/`:
 | `/wiz/camera/raw`        | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 | `/wiz/camera/annotated`  | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 | `/wiz/vision/detections` | `wiz_interfaces/DetectionArray`     | reliable, depth 10 |
+| `/wiz/terrain/grid`      | `nav_msgs/OccupancyGrid`            | reliable, depth 10 |
+| `/wiz/terrain/overlay`   | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 
 QoS is kept at simple reliable defaults for now. Revisit once real sensors
 are attached (e.g. best-effort + smaller depth for a high-rate raw sensor
@@ -126,3 +129,64 @@ All data published this sprint is **simulated** — there is no link to the
 physical flight controller yet. See docs/ARCHITECTURE.md: the flight-control
 firmware stack (Betaflight vs. ArduPilot/PX4) is still an open decision, so a
 real hardware bridge is deliberately out of scope until that's resolved.
+
+## Terrain grid semantics
+
+`/wiz/terrain/grid` is a `nav_msgs/OccupancyGrid`, but **its values are a
+traversability cost, not an occupancy probability**:
+
+| Value   | Meaning                          |
+|---------|----------------------------------|
+| `0`     | clear / low-cost terrain         |
+| `100`   | impassable / highest-cost terrain |
+| `-1`    | unknown                          |
+
+Nothing in Sprint 4 estimates the probability that a cell is occupied. The
+number answers "how hard would this be to cross", derived from image
+appearance alone.
+
+### Cost formula
+
+Per cell, after averaging each channel down to the grid:
+
+```
+rough_term = clip((mean_roughness - roughness_threshold) * roughness_gain, 0, 100)
+veg_term   = vegetation_fraction * veg_weight
+cost       = clip(rough_term + veg_term, 0, 100)
+
+if obstacle_fraction >= obstacle_fraction_threshold:
+    cost = obstacle_cost        # a detected obstacle overrides the rest
+```
+
+### What this grid is, and is not
+
+It is a **single-frame, camera-relative (local) traversability grid**. Each
+frame yields an independent grid describing only what that frame shows.
+
+It is **not** a persistent world map: no pose is consumed and nothing is
+accumulated between frames. `header.frame_id` stays `base_link`, which is
+acceptable precisely because there is no localization yet. `odom`/`map`
+frames, frame-to-map transformation and multi-frame accumulation arrive in
+Sprint 5.
+
+Grid placement in `base_link` (x-forward, y-left, z-up): image row 0 is
+farthest forward and becomes the largest `x` index; image column 0 is the
+drone's left and becomes the largest `y` index. So `info.width` is the
+forward extent (image rows) and `info.height` the lateral one (image
+columns). The grid spans `x` in `[0, forward_extent]` and `y` in
+`[-lateral/2, +lateral/2]`.
+
+### Parameters
+
+`terrain_node` exposes every tunable: `resize_width`, `grid_rows`,
+`grid_cols`, `blur_kernel`, `veg_hsv_lower`, `veg_hsv_upper`, `veg_weight`,
+`roughness_threshold`, `roughness_gain`, `canny_low`, `canny_high`,
+`min_contour_area`, `obstacle_fraction_threshold`, `obstacle_cost`,
+`morph_kernel`, `assumed_altitude_m`, `camera_hfov_deg`,
+`unknown_border_cells`, `publish_overlay`. Invalid values are rejected at
+startup rather than silently clamped. Defaults are mirrored in
+`config/default.yaml`.
+
+`assumed_altitude_m` and `camera_hfov_deg` are **assumptions**, not
+measurements — there is no altitude telemetry yet, and the node logs this at
+startup.

@@ -4,3 +4,37 @@ drone:
 
 logging:
   level: INFO
+
+# Terrain analysis defaults. These mirror TerrainConfig in
+# ros2_ws/src/wiz_terrain/wiz_terrain/terrain.py and are exposed as
+# terrain_node ROS parameters.
+terrain:
+  resize_width: 320
+  grid_rows: 24          # image rows -> forward extent of the grid
+  grid_cols: 32          # image cols -> lateral extent of the grid
+  blur_kernel: 5
+
+  # Vegetation: HSV band (OpenCV hue is 0..179)
+  veg_hsv_lower: [35, 40, 25]
+  veg_hsv_upper: [90, 255, 255]
+  veg_weight: 35.0
+
+  # Surface roughness from Sobel gradient magnitude
+  roughness_threshold: 18.0
+  roughness_gain: 2.0
+
+  # Discrete obstacles from Canny + contours
+  canny_low: 60
+  canny_high: 160
+  min_contour_area: 60
+  obstacle_fraction_threshold: 0.25
+  obstacle_cost: 100
+
+  morph_kernel: 3
+
+  # ASSUMPTIONS, not measurements: there is no altitude telemetry yet.
+  # Used only to convert pixels to metres for OccupancyGrid.info.resolution.
+  assumed_altitude_m: 3.0
+  camera_hfov_deg: 70.0
+
+  unknown_border_cells: 0

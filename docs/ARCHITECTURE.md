@@ -60,12 +60,14 @@ Wiz/
 ├── config/                      runtime config files (YAML)
 ├── models/                      downloaded model weights (gitignored, see scripts/)
 ├── scripts/
-│   └── download_vision_models.sh   fetches MobileNet-SSD weights
+│   ├── download_vision_models.sh   fetches MobileNet-SSD weights
+│   └── render_terrain_demo.py      renders the terrain pipeline without ROS
 ├── ros2_ws/                     colcon workspace for ROS 2 packages
 │   └── src/
 │       ├── wiz_interfaces/       custom .msg definitions (ament_cmake)
 │       ├── wiz_status/            status publisher/subscriber nodes + tests
 │       ├── wiz_vision/            camera capture + CV processing nodes + tests
+│       ├── wiz_terrain/           terrain analysis + traversability grid + tests
 │       └── wiz_bringup/           launch files
 ├── tests/                       pytest test suite (src/wiz only)
 └── docs/                        architecture, roadmap, ROS 2 conventions
@@ -75,3 +77,50 @@ Note: `src/wiz/cv/` was reserved in Sprint 1 as a placeholder but is intentional
 still empty — the actual computer-vision implementation (Sprint 3) is a ROS 2
 package (`ros2_ws/src/wiz_vision/`), consistent with how Sprint 2's status
 nodes also live under `ros2_ws/` rather than in `src/wiz/`.
+
+## Terrain Mapping (Sprint 4)
+
+`ros2_ws/src/wiz_terrain/` follows the same split as `wiz_vision`: the
+algorithms live in `terrain.py` with **no ROS imports**, so they are testable
+without a ROS installation, and `terrain_node.py` is a thin ROS wrapper.
+
+Pipeline, per frame:
+
+1. downscale (`INTER_AREA`) and Gaussian blur
+2. HSV threshold for vegetation (hue is stabler than BGR under changing light)
+3. Sobel gradient magnitude on the **unblurred** grey as a roughness proxy
+4. Canny + area-filtered contours for discrete obstacles
+5. morphological cleanup — open+close on region masks, close only on edges
+   (a 1-pixel Canny edge would not survive an opening)
+6. average each channel down to grid cells and combine into a cost
+
+Roughness deliberately reads the sharp grey: blurring first removes exactly
+the high-frequency texture it exists to measure, which made coarse rubble
+score as clear ground.
+
+### Why OccupancyGrid
+
+`nav_msgs/OccupancyGrid` is reused as the transport because it is standard
+and rviz2 renders it natively, avoiding a custom message. Its value range is
+being used as a **traversability cost**, *not* an occupancy probability —
+see docs/ROS2_CONVENTIONS.md.
+
+### Scale assumptions
+
+`OccupancyGrid.info.resolution` is computed from declared parameters, not
+measured:
+
+```
+ground_sample_distance = 2 * assumed_altitude_m * tan(camera_hfov_deg / 2) / image_width
+cell_size              = ground_sample_distance * (image_width / grid_cols)
+```
+
+This assumes a nadir camera, flat level ground, exact altitude, and a
+rectilinear undistorted lens. None of these are verified in Sprint 4; the
+node logs the assumption at startup. Sprint 5 replaces the altitude
+assumption with real pose.
+
+`OccupancyGrid` carries a single `resolution`, so cells must be square. The
+defaults (320 px wide, 24x32 grid) give exactly 10x10 px cells; the node
+warns if a parameter choice makes forward and lateral cell sizes differ by
+more than 10%.
