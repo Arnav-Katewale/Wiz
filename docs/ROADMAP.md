@@ -27,11 +27,15 @@ camera-relative traversability grid as `nav_msgs/OccupancyGrid` and an
 annotated overlay. Scale derived from declared altitude/FOV assumptions.
 Tested on synthetic imagery only — no real-terrain validation.
 
-## Sprint 5 — Pose-aware multi-frame terrain mapping (next, not started)
+## Sprint 5 — Pose-aware multi-frame terrain mapping (in progress)
 Consume pose (position, altitude, heading), transform per-frame observations
 into a persistent map with `odom`/`map` frames, accumulate across frames with
 cell confidence and repeated-observation weighting. This is where the
 single-frame limitation of Sprint 4 gets lifted.
+
+Progress: `wiz_terrain/pose.py` maps camera-relative grid cells into the `map`
+frame from a 2-D pose (x, y, heading), with tests. Not yet wired into
+`terrain_node`; no accumulation yet.
 
 ## Candidate future sprints (order/scope not yet committed)
 - Simulation environment: Gazebo + ROS 2 Humble bring-up
