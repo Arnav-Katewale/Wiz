@@ -52,6 +52,38 @@ class Pose2D:
                 raise ValueError(f"pose {name} must be finite, got {value}")
 
 
+def yaw_from_quaternion(qx: float, qy: float, qz: float, qw: float) -> float:
+    """Heading (rotation about z) of a quaternion, in radians, in [-pi, pi).
+
+    Uses the standard z-y-x (yaw-pitch-roll) decomposition::
+
+        yaw = atan2(2 (qw qz + qx qy), 1 - 2 (qy^2 + qz^2))
+
+    The quaternion is normalised first, so a slightly non-unit input (common
+    after float round-trips) still gives the right heading.
+    """
+    values = (qx, qy, qz, qw)
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError(f"quaternion must be finite, got {values}")
+    norm = math.sqrt(sum(v * v for v in values))
+    if norm < 1e-9:
+        raise ValueError("quaternion has zero length")
+    qx, qy, qz, qw = (v / norm for v in values)
+    yaw = math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+    return normalize_angle(yaw)
+
+
+def pose_from_telemetry(px: float, py: float,
+                        qx: float, qy: float, qz: float, qw: float) -> Pose2D:
+    """2-D pose from a ``Telemetry`` position and orientation.
+
+    Takes plain numbers so this stays ROS-free; ``terrain_node`` unpacks the
+    message. Altitude (``position.z``), roll and pitch are dropped: this is the
+    flat-ground, level-drone case described at the top of this module.
+    """
+    return Pose2D(float(px), float(py), yaw_from_quaternion(qx, qy, qz, qw))
+
+
 def body_to_map(pose: Pose2D, bx, by):
     """Transform body-frame point(s) into ``map``. Works on floats or arrays."""
     c, s = math.cos(pose.yaw), math.sin(pose.yaw)

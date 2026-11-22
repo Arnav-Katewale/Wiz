@@ -12,6 +12,8 @@ from wiz_terrain.pose import (
     grid_cells_to_map,
     map_to_body,
     normalize_angle,
+    pose_from_telemetry,
+    yaw_from_quaternion,
 )
 from wiz_terrain.terrain import to_occupancy_row_major
 
@@ -127,3 +129,41 @@ def test_invalid_grid_rejected(rows, cols, cell):
 def test_cell_outside_grid_rejected():
     with pytest.raises(ValueError, match="outside"):
         cell_centre_body(4, 0, rows=4, cols=4, cell_m=0.1)
+
+
+# --- quaternion / telemetry ----------------------------------------------
+
+def _yaw_quaternion(yaw):
+    """Unit quaternion for a pure rotation of ``yaw`` about z: (x, y, z, w)."""
+    return 0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)
+
+
+@pytest.mark.parametrize("yaw", [0.0, 0.4, math.pi / 2, -2.5, 3.0])
+def test_yaw_from_pure_z_rotation(yaw):
+    assert yaw_from_quaternion(*_yaw_quaternion(yaw)) == pytest.approx(yaw)
+
+
+def test_yaw_ignores_quaternion_scale():
+    qx, qy, qz, qw = _yaw_quaternion(1.1)
+    assert yaw_from_quaternion(3 * qx, 3 * qy, 3 * qz, 3 * qw) == pytest.approx(1.1)
+
+
+def test_yaw_unaffected_by_small_roll():
+    # q = q_yaw * q_roll: a 10 deg roll about the body x axis must not change
+    # the heading.
+    yaw, roll = 0.8, math.radians(10)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    qw, qx, qy, qz = cy * cr, cy * sr, sy * sr, sy * cr
+    assert yaw_from_quaternion(qx, qy, qz, qw) == pytest.approx(yaw)
+
+
+@pytest.mark.parametrize("q", [(0.0, 0.0, 0.0, 0.0), (0.0, float("nan"), 0.0, 1.0)])
+def test_invalid_quaternion_rejected(q):
+    with pytest.raises(ValueError):
+        yaw_from_quaternion(*q)
+
+
+def test_pose_from_telemetry():
+    pose = pose_from_telemetry(3.0, -1.5, *_yaw_quaternion(0.25))
+    assert (pose.x, pose.y, pose.yaw) == pytest.approx((3.0, -1.5, 0.25))

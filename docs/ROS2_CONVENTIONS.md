@@ -163,11 +163,12 @@ if obstacle_fraction >= obstacle_fraction_threshold:
 It is a **single-frame, camera-relative (local) traversability grid**. Each
 frame yields an independent grid describing only what that frame shows.
 
-It is **not** a persistent world map: no pose is consumed and nothing is
-accumulated between frames. `header.frame_id` stays `base_link`, which is
-acceptable precisely because there is no localization yet. `odom`/`map`
-frames, frame-to-map transformation and multi-frame accumulation arrive in
-Sprint 5.
+It is **not** a persistent world map: nothing is accumulated between frames.
+`header.frame_id` stays `base_link`. Since Sprint 5 started, `terrain_node`
+also subscribes to `/wiz/telemetry` and keeps the latest 2-D pose (position
+x/y plus heading from the orientation quaternion), but does not use it for the
+published grid yet. `odom`/`map` frames and multi-frame accumulation are the
+rest of Sprint 5.
 
 Grid placement in `base_link` (x-forward, y-left, z-up): image row 0 is
 farthest forward and becomes the largest `x` index; image column 0 is the

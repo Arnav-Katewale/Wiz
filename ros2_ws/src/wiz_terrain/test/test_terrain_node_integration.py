@@ -5,6 +5,7 @@ topic plumbing and message validity end to end -- not terrain-interpretation
 quality on real imagery.
 """
 
+import math
 import time
 
 import pytest
@@ -13,6 +14,7 @@ from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from sensor_msgs.msg import Image
+from wiz_interfaces.msg import Telemetry
 
 from wiz_terrain.terrain import COST_MAX, UNKNOWN
 from wiz_terrain.terrain_node import TerrainNode
@@ -120,4 +122,35 @@ def test_terrain_node_honours_grid_parameter_overrides():
         camera.destroy_node()
         terrain.destroy_node()
         listener.destroy_node()
+        rclpy.shutdown()
+
+
+def test_terrain_node_tracks_pose_from_telemetry():
+    """A Telemetry message must update the node's latest pose (heading from quaternion)."""
+    rclpy.init()
+    terrain = TerrainNode()
+    talker = Node('test_telemetry_talker')
+    pub = talker.create_publisher(Telemetry, '/wiz/telemetry', 10)
+
+    msg = Telemetry()
+    msg.position.x, msg.position.y, msg.position.z = 2.0, -0.5, 3.0
+    yaw = 0.6  # pure rotation about z
+    msg.orientation.z = math.sin(yaw / 2)
+    msg.orientation.w = math.cos(yaw / 2)
+
+    def publish_and_check():
+        pub.publish(msg)
+        return terrain.latest_pose is not None
+
+    try:
+        assert terrain.latest_pose is None
+        ok = _spin_until([talker, terrain], publish_and_check, timeout_sec=5.0)
+        assert ok, 'terrain_node never received /wiz/telemetry'
+        pose = terrain.latest_pose
+        assert pose.x == pytest.approx(2.0)
+        assert pose.y == pytest.approx(-0.5)
+        assert pose.yaw == pytest.approx(yaw)
+    finally:
+        terrain.destroy_node()
+        talker.destroy_node()
         rclpy.shutdown()

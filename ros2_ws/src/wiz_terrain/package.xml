@@ -10,6 +10,7 @@
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>
   <depend>nav_msgs</depend>
+  <depend>wiz_interfaces</depend>
   <depend>cv_bridge</depend>
   <depend>python3-opencv</depend>
   <depend>python3-numpy</depend>

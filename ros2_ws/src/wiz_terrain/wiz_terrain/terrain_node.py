@@ -1,9 +1,12 @@
 """ROS 2 wrapper around the terrain analysis layer.
 
 Subscribes to camera frames and publishes a **single-frame, camera-relative
-(local) traversability grid**. Nothing is accumulated between frames and no
-pose is consumed, so the published grid describes only what the current frame
-shows, in the ``base_link`` frame. It is not a persistent world map.
+(local) traversability grid**. Nothing is accumulated between frames, so the
+published grid describes only what the current frame shows, in the
+``base_link`` frame. It is not a persistent world map.
+
+It also tracks the latest drone pose from ``/wiz/telemetry`` (Sprint 5 groundwork).
+The pose is not yet used for the published grid.
 
 ``nav_msgs/OccupancyGrid`` is reused as the transport because it is a standard
 message that rviz2 renders natively, but its value range carries a
@@ -20,7 +23,9 @@ from cv_bridge import CvBridge, CvBridgeError
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from wiz_interfaces.msg import Telemetry
 
+from wiz_terrain.pose import Pose2D, pose_from_telemetry
 from wiz_terrain.terrain import (
     TerrainConfig,
     build_traversability_grid,
@@ -80,9 +85,14 @@ class TerrainNode(Node):
         self._frames_rejected = 0
         self._last_frame_time = None
         self._warned_cell_aspect = False
+        self._pose = None
+        self._telemetry_rejected = 0
 
         self._sub = self.create_subscription(
             Image, '/wiz/camera/raw', self._on_frame, 10
+        )
+        self._telemetry_sub = self.create_subscription(
+            Telemetry, '/wiz/telemetry', self._on_telemetry, 10
         )
         self._grid_pub = self.create_publisher(OccupancyGrid, '/wiz/terrain/grid', 10)
         self._overlay_pub = self.create_publisher(
@@ -128,6 +138,26 @@ class TerrainNode(Node):
             camera_hfov_deg=float(get('camera_hfov_deg')),
             unknown_border_cells=int(get('unknown_border_cells')),
         )
+
+    @property
+    def latest_pose(self) -> 'Pose2D | None':
+        """Most recent valid pose from /wiz/telemetry, or None if none yet."""
+        return self._pose
+
+    def _on_telemetry(self, msg: Telemetry) -> None:
+        p, q = msg.position, msg.orientation
+        try:
+            pose = pose_from_telemetry(p.x, p.y, q.x, q.y, q.z, q.w)
+        except ValueError as exc:
+            self._telemetry_rejected += 1
+            self.get_logger().warn(f'ignoring unusable telemetry pose: {exc}')
+            return
+        if self._pose is None:
+            self.get_logger().info(
+                f'first pose from /wiz/telemetry: x={pose.x:.2f} m, '
+                f'y={pose.y:.2f} m, heading={pose.yaw:.2f} rad'
+            )
+        self._pose = pose
 
     def _check_frame_timeout(self) -> None:
         if self._last_frame_time is None:
