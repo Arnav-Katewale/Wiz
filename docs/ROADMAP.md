@@ -35,8 +35,10 @@ single-frame limitation of Sprint 4 gets lifted.
 
 Progress: `wiz_terrain/pose.py` maps camera-relative grid cells into the `map`
 frame from a 2-D pose (x, y, heading), with tests. `terrain_node` now tracks
-the latest pose from `/wiz/telemetry`, but does not use it for the grid yet;
-no accumulation yet.
+the latest pose from `/wiz/telemetry`, but does not use it for the grid yet.
+`wiz_terrain/map_grid.py` accumulates frames into a fixed `map` grid with a
+running-average cost and an observation count (confidence) per cell, with
+tests; it is not yet wired into `terrain_node`.
 
 ## Candidate future sprints (order/scope not yet committed)
 - Simulation environment: Gazebo + ROS 2 Humble bring-up
