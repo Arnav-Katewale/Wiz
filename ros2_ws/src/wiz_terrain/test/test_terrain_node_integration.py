@@ -154,3 +154,90 @@ def test_terrain_node_tracks_pose_from_telemetry():
         terrain.destroy_node()
         talker.destroy_node()
         rclpy.shutdown()
+
+
+def _telemetry(x, y, yaw):
+    msg = Telemetry()
+    msg.position.x, msg.position.y, msg.position.z = x, y, 3.0
+    msg.orientation.z = math.sin(yaw / 2)
+    msg.orientation.w = math.cos(yaw / 2)
+    return msg
+
+
+def test_terrain_node_publishes_accumulated_map_at_pose():
+    """Telemetry + camera frames must produce a map-frame grid filled around the pose."""
+    rclpy.init()
+    camera = CameraNode()
+    terrain = TerrainNode()
+    talker = Node('test_map_talker')
+    pub = talker.create_publisher(Telemetry, '/wiz/telemetry', 10)
+    received = []
+    talker.create_subscription(OccupancyGrid, '/wiz/terrain/map', received.append, 10)
+    pose_x, pose_y, yaw = 2.0, -1.0, math.pi / 2  # facing map +y
+
+    def publish_and_check():
+        pub.publish(_telemetry(pose_x, pose_y, yaw))
+        return len(received) >= 2
+
+    try:
+        ok = _spin_until([camera, terrain, talker], publish_and_check, timeout_sec=10.0)
+        assert ok, 'no /wiz/terrain/map received'
+        m = received[-1]
+        assert m.header.frame_id == 'map'
+        assert (m.info.width, m.info.height) == (200, 200)
+        assert m.info.resolution == pytest.approx(0.15)
+        assert (m.info.origin.position.x, m.info.origin.position.y) == (-15.0, -15.0)
+        assert len(m.data) == 200 * 200
+        assert all(UNKNOWN <= v <= COST_MAX for v in m.data)
+
+        known = [i for i, v in enumerate(m.data) if v != UNKNOWN]
+        assert known, 'map has no observed cells'
+        # Facing +y, everything seen lies ahead of the drone (y >= pose y)
+        # and within the frame's footprint (a few metres).
+        for i in known:
+            iy, ix = divmod(i, m.info.width)
+            cx = m.info.origin.position.x + (ix + 0.5) * m.info.resolution
+            cy = m.info.origin.position.y + (iy + 0.5) * m.info.resolution
+            assert cy >= pose_y - m.info.resolution
+            assert math.hypot(cx - pose_x, cy - pose_y) < 5.0
+        # Repeated frames from the same pose raise the observation count.
+        assert terrain.accumulated_map.observations.max() >= 2
+    finally:
+        camera.destroy_node()
+        terrain.destroy_node()
+        talker.destroy_node()
+        rclpy.shutdown()
+
+
+def test_terrain_node_skips_map_until_pose_known():
+    """Without telemetry, frames still give the local grid but nothing reaches the map."""
+    rclpy.init()
+    camera = CameraNode()
+    terrain = TerrainNode()
+    listener = Node('test_map_listener')
+    grids, maps = [], []
+    listener.create_subscription(OccupancyGrid, '/wiz/terrain/grid', grids.append, 10)
+    listener.create_subscription(OccupancyGrid, '/wiz/terrain/map', maps.append, 10)
+    try:
+        ok = _spin_until([camera, terrain, listener], lambda: len(grids) >= 3, timeout_sec=8.0)
+        assert ok, 'no local grid received'
+        assert maps == []
+        assert terrain.accumulated_map.observations.sum() == 0
+    finally:
+        camera.destroy_node()
+        terrain.destroy_node()
+        listener.destroy_node()
+        rclpy.shutdown()
+
+
+@pytest.mark.parametrize('name,ptype,value', [
+    ('map_resolution_m', Parameter.Type.DOUBLE, 0.0),
+    ('map_width_cells', Parameter.Type.INTEGER, 0),
+])
+def test_terrain_node_refuses_invalid_map_parameters(name, ptype, value):
+    rclpy.init()
+    try:
+        with pytest.raises(ValueError):
+            TerrainNode(parameter_overrides=[Parameter(name, ptype, value)])
+    finally:
+        rclpy.shutdown()

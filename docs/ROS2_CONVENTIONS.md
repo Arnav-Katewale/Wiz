@@ -86,6 +86,7 @@ All Wiz topics are namespaced under `/wiz/`:
 | `/wiz/camera/annotated`  | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 | `/wiz/vision/detections` | `wiz_interfaces/DetectionArray`     | reliable, depth 10 |
 | `/wiz/terrain/grid`      | `nav_msgs/OccupancyGrid`            | reliable, depth 10 |
+| `/wiz/terrain/map`       | `nav_msgs/OccupancyGrid`            | reliable, depth 10 |
 | `/wiz/terrain/overlay`   | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 
 QoS is kept at simple reliable defaults for now. Revisit once real sensors
@@ -132,8 +133,10 @@ real hardware bridge is deliberately out of scope until that's resolved.
 
 ## Terrain grid semantics
 
-`/wiz/terrain/grid` is a `nav_msgs/OccupancyGrid`, but **its values are a
-traversability cost, not an occupancy probability**:
+`/wiz/terrain/grid` (one frame, `base_link`) and `/wiz/terrain/map`
+(accumulated, `map` frame) are `nav_msgs/OccupancyGrid`s, but **their values
+are a traversability cost, not an occupancy probability**. In the map, each
+cell is the average cost of every frame that observed it:
 
 | Value   | Meaning                          |
 |---------|----------------------------------|

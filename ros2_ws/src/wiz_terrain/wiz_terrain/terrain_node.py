@@ -1,12 +1,20 @@
 """ROS 2 wrapper around the terrain analysis layer.
 
-Subscribes to camera frames and publishes a **single-frame, camera-relative
-(local) traversability grid**. Nothing is accumulated between frames, so the
-published grid describes only what the current frame shows, in the
-``base_link`` frame. It is not a persistent world map.
+Subscribes to camera frames and publishes two grids:
 
-It also tracks the latest drone pose from ``/wiz/telemetry`` (Sprint 5 groundwork).
-The pose is not yet used for the published grid.
+* ``/wiz/terrain/grid``: the **single-frame, camera-relative (local)
+  traversability grid** in ``base_link``. It describes only what the current
+  frame shows.
+* ``/wiz/terrain/map``: a **persistent map** in the ``map`` frame. Every frame
+  that arrives after a pose is known is merged into an ``AccumulatedMap``
+  (``map_grid.py``) at the latest pose from ``/wiz/telemetry``; each map cell
+  holds the average cost of every observation of it. Frames that arrive
+  before any pose are skipped for the map (with a warning), because there is
+  nowhere to put them.
+
+The map uses the most recent pose, not one matched to the frame's timestamp,
+so fast motion between telemetry and frame shifts cells slightly. Matching
+timestamps is a later refinement.
 
 ``nav_msgs/OccupancyGrid`` is reused as the transport because it is a standard
 message that rviz2 renders natively, but its value range carries a
@@ -25,6 +33,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from wiz_interfaces.msg import Telemetry
 
+from wiz_terrain.map_grid import AccumulatedMap
 from wiz_terrain.pose import Pose2D, pose_from_telemetry
 from wiz_terrain.terrain import (
     TerrainConfig,
@@ -69,10 +78,26 @@ class TerrainNode(Node):
         self.declare_parameter('camera_hfov_deg', defaults.camera_hfov_deg)
         self.declare_parameter('unknown_border_cells', defaults.unknown_border_cells)
         self.declare_parameter('publish_overlay', True)
+        # Persistent map in the ``map`` frame. Defaults: 200 x 200 cells of
+        # 0.15 m (a 30 m square centred on the map origin). Keep the
+        # resolution at least the frame cell size, or the map gets gaps.
+        self.declare_parameter('map_width_cells', 200)
+        self.declare_parameter('map_height_cells', 200)
+        self.declare_parameter('map_resolution_m', 0.15)
+        self.declare_parameter('map_origin_x', -15.0)
+        self.declare_parameter('map_origin_y', -15.0)
 
         try:
             self._config = self._config_from_parameters()
             self._config.validate()
+            get = lambda name: self.get_parameter(name).value  # noqa: E731
+            self._map = AccumulatedMap(
+                width=int(get('map_width_cells')),
+                height=int(get('map_height_cells')),
+                resolution_m=float(get('map_resolution_m')),
+                origin_x=float(get('map_origin_x')),
+                origin_y=float(get('map_origin_y')),
+            )
         except (ValueError, TypeError) as exc:
             self.get_logger().error(
                 f'invalid terrain parameters, refusing to start: {exc}'
@@ -87,6 +112,7 @@ class TerrainNode(Node):
         self._warned_cell_aspect = False
         self._pose = None
         self._telemetry_rejected = 0
+        self._frames_without_pose = 0
 
         self._sub = self.create_subscription(
             Image, '/wiz/camera/raw', self._on_frame, 10
@@ -95,12 +121,19 @@ class TerrainNode(Node):
             Telemetry, '/wiz/telemetry', self._on_telemetry, 10
         )
         self._grid_pub = self.create_publisher(OccupancyGrid, '/wiz/terrain/grid', 10)
+        self._map_pub = self.create_publisher(OccupancyGrid, '/wiz/terrain/map', 10)
         self._overlay_pub = self.create_publisher(
             Image, '/wiz/terrain/overlay', 10
         )
         self._watchdog = self.create_timer(1.0, self._check_frame_timeout)
 
         gsd = ground_sample_distance(self._config, self._config.resize_width)
+        frame_cell = gsd * self._config.resize_width / float(self._config.grid_cols)
+        if self._map.resolution_m < frame_cell:
+            self.get_logger().warn(
+                f'map_resolution_m {self._map.resolution_m:.3f} m is finer than the '
+                f'frame cell size {frame_cell:.3f} m; the map will have gaps'
+            )
         self.get_logger().info(
             'terrain_node started, subscribing to /wiz/camera/raw; '
             f'grid {self._config.grid_rows}x{self._config.grid_cols} (image-space)'
@@ -191,6 +224,7 @@ class TerrainNode(Node):
 
         self._frames_processed += 1
         self._publish_grid(result, msg)
+        self._update_map(result, msg)
 
         if self._publish_overlay:
             self._publish_overlay_image(result, msg)
@@ -233,6 +267,35 @@ class TerrainNode(Node):
 
         grid_msg.data = data
         self._grid_pub.publish(grid_msg)
+
+    def _update_map(self, result, source_msg: Image) -> None:
+        """Merge this frame into the persistent map and publish the map."""
+        if self._pose is None:
+            self._frames_without_pose += 1
+            self.get_logger().warn(
+                'no pose from /wiz/telemetry yet; frame not added to the map',
+                throttle_duration_sec=5.0,
+            )
+            return
+        self._map.integrate(result.grid, self._pose, result.cell_size_m)
+
+        data, width, height = self._map.to_occupancy()
+        map_msg = OccupancyGrid()
+        map_msg.header.stamp = source_msg.header.stamp
+        map_msg.header.frame_id = 'map'
+        map_msg.info.map_load_time = source_msg.header.stamp
+        map_msg.info.resolution = float(self._map.resolution_m)
+        map_msg.info.width = int(width)
+        map_msg.info.height = int(height)
+        map_msg.info.origin.position.x = float(self._map.origin_x)
+        map_msg.info.origin.position.y = float(self._map.origin_y)
+        map_msg.info.origin.orientation.w = 1.0
+        map_msg.data = data
+        self._map_pub.publish(map_msg)
+
+    @property
+    def accumulated_map(self) -> AccumulatedMap:
+        return self._map
 
     def _publish_overlay_image(self, result, source_msg: Image) -> None:
         try:
