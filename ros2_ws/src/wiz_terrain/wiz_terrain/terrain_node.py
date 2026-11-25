@@ -7,14 +7,14 @@ Subscribes to camera frames and publishes two grids:
   frame shows.
 * ``/wiz/terrain/map``: a **persistent map** in the ``map`` frame. Every frame
   that arrives after a pose is known is merged into an ``AccumulatedMap``
-  (``map_grid.py``) at the latest pose from ``/wiz/telemetry``; each map cell
-  holds the average cost of every observation of it. Frames that arrive
-  before any pose are skipped for the map (with a warning), because there is
-  nowhere to put them.
+  (``map_grid.py``) at the drone pose *at that frame's timestamp*,
+  interpolated from recent ``/wiz/telemetry`` (``pose.PoseBuffer``); each map
+  cell holds the average cost of every observation of it. Frames whose time
+  has no known pose (before the first telemetry, or telemetry gone quiet)
+  are skipped for the map with a warning, because there is nowhere honest to
+  put them.
 
-The map uses the most recent pose, not one matched to the frame's timestamp,
-so fast motion between telemetry and frame shifts cells slightly. Matching
-timestamps is a later refinement.
+A message with an unset (zero) stamp is timed by when it arrived instead.
 
 ``nav_msgs/OccupancyGrid`` is reused as the transport because it is a standard
 message that rviz2 renders natively, but its value range carries a
@@ -34,7 +34,7 @@ from sensor_msgs.msg import Image
 from wiz_interfaces.msg import Telemetry
 
 from wiz_terrain.map_grid import AccumulatedMap
-from wiz_terrain.pose import Pose2D, pose_from_telemetry
+from wiz_terrain.pose import Pose2D, PoseBuffer, pose_from_telemetry
 from wiz_terrain.terrain import (
     TerrainConfig,
     build_traversability_grid,
@@ -86,6 +86,10 @@ class TerrainNode(Node):
         self.declare_parameter('map_resolution_m', 0.15)
         self.declare_parameter('map_origin_x', -15.0)
         self.declare_parameter('map_origin_y', -15.0)
+        # How much telemetry history to keep for matching frame timestamps,
+        # and how long past the newest telemetry its pose may still be used.
+        self.declare_parameter('pose_history_s', 2.0)
+        self.declare_parameter('pose_hold_s', 0.2)
 
         try:
             self._config = self._config_from_parameters()
@@ -97,6 +101,10 @@ class TerrainNode(Node):
                 resolution_m=float(get('map_resolution_m')),
                 origin_x=float(get('map_origin_x')),
                 origin_y=float(get('map_origin_y')),
+            )
+            self._poses = PoseBuffer(
+                max_history_s=float(get('pose_history_s')),
+                max_hold_s=float(get('pose_hold_s')),
             )
         except (ValueError, TypeError) as exc:
             self.get_logger().error(
@@ -191,6 +199,7 @@ class TerrainNode(Node):
                 f'y={pose.y:.2f} m, heading={pose.yaw:.2f} rad'
             )
         self._pose = pose
+        self._poses.add(self._stamp_seconds(msg.header.stamp), pose)
 
     def _check_frame_timeout(self) -> None:
         if self._last_frame_time is None:
@@ -268,16 +277,23 @@ class TerrainNode(Node):
         grid_msg.data = data
         self._grid_pub.publish(grid_msg)
 
+    def _stamp_seconds(self, stamp) -> float:
+        """Message stamp in seconds; an unset (zero) stamp means 'now'."""
+        if stamp.sec == 0 and stamp.nanosec == 0:
+            return self.get_clock().now().nanoseconds / 1e9
+        return stamp.sec + stamp.nanosec / 1e9
+
     def _update_map(self, result, source_msg: Image) -> None:
         """Merge this frame into the persistent map and publish the map."""
-        if self._pose is None:
+        pose = self._poses.pose_at(self._stamp_seconds(source_msg.header.stamp))
+        if pose is None:
             self._frames_without_pose += 1
             self.get_logger().warn(
-                'no pose from /wiz/telemetry yet; frame not added to the map',
+                'no /wiz/telemetry pose for this frame time; frame not added to the map',
                 throttle_duration_sec=5.0,
             )
             return
-        self._map.integrate(result.grid, self._pose, result.cell_size_m)
+        self._map.integrate(result.grid, pose, result.cell_size_m)
 
         data, width, height = self._map.to_occupancy()
         map_msg = OccupancyGrid()

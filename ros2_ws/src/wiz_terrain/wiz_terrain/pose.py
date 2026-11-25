@@ -25,6 +25,7 @@ shift where a nadir camera looks; ignoring them is an explicit assumption,
 the same one ``ground_sample_distance`` already makes.
 """
 
+import bisect
 import math
 from dataclasses import dataclass
 from typing import Tuple
@@ -133,3 +134,68 @@ def _check_grid(rows: int, cols: int, cell_m: float) -> None:
         raise ValueError(f"grid must be at least 1x1, got {rows}x{cols}")
     if not (math.isfinite(cell_m) and cell_m > 0):
         raise ValueError(f"cell_m must be a positive finite size, got {cell_m}")
+
+
+class PoseBuffer:
+    """Recent timestamped poses, so a camera frame can be placed at its own time.
+
+    Telemetry and camera frames arrive at different rates and with different
+    delays, so "the latest pose" when a frame is processed is usually not the
+    pose the drone had when the frame was taken. ``pose_at(t)`` answers with
+    the pose at time ``t``:
+
+    * between two stored poses: linear interpolation. Position blends as
+      ``p0 + f * (p1 - p0)`` with ``f = (t - t0) / (t1 - t0)``; heading blends
+      the same way but along the *shorter* way round the circle, so going
+      from 179 deg to -179 deg passes through 180, not through 0.
+    * slightly newer than the newest pose (at most ``max_hold_s``): the newest
+      pose is held. Extrapolating forward would guess motion we have not seen.
+    * older than the oldest stored pose, or too far past the newest: ``None``,
+      because there is no honest answer.
+
+    Poses older than ``max_history_s`` behind the newest are dropped. Times
+    are plain seconds (floats); the ROS node converts message stamps.
+    """
+
+    def __init__(self, max_history_s: float = 2.0, max_hold_s: float = 0.2):
+        if not (math.isfinite(max_history_s) and max_history_s > 0):
+            raise ValueError(f"max_history_s must be positive, got {max_history_s}")
+        if not (math.isfinite(max_hold_s) and max_hold_s >= 0):
+            raise ValueError(f"max_hold_s must be >= 0, got {max_hold_s}")
+        self.max_history_s = max_history_s
+        self.max_hold_s = max_hold_s
+        self._times = []
+        self._poses = []
+
+    def __len__(self) -> int:
+        return len(self._times)
+
+    def add(self, t_s: float, pose: Pose2D) -> bool:
+        """Store a pose. Returns False (and ignores it) if not newer than the last one."""
+        if not math.isfinite(t_s):
+            raise ValueError(f"time must be finite, got {t_s}")
+        if self._times and t_s <= self._times[-1]:
+            return False
+        self._times.append(t_s)
+        self._poses.append(pose)
+        cutoff = t_s - self.max_history_s
+        drop = bisect.bisect_left(self._times, cutoff)
+        if drop:
+            del self._times[:drop]
+            del self._poses[:drop]
+        return True
+
+    def pose_at(self, t_s: float):
+        """Pose at time ``t_s``, or None if it cannot be known (see class docstring)."""
+        if not self._times or not math.isfinite(t_s):
+            return None
+        if t_s < self._times[0]:
+            return None
+        if t_s >= self._times[-1]:
+            return self._poses[-1] if t_s - self._times[-1] <= self.max_hold_s else None
+        i = bisect.bisect_right(self._times, t_s)  # times[i-1] <= t < times[i]
+        t0, t1 = self._times[i - 1], self._times[i]
+        p0, p1 = self._poses[i - 1], self._poses[i]
+        f = (t_s - t0) / (t1 - t0)
+        yaw = normalize_angle(p0.yaw + f * normalize_angle(p1.yaw - p0.yaw))
+        return Pose2D(p0.x + f * (p1.x - p0.x), p0.y + f * (p1.y - p0.y), yaw)
