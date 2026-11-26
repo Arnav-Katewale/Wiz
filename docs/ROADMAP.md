@@ -39,8 +39,9 @@ the latest pose from `/wiz/telemetry`. `wiz_terrain/map_grid.py` accumulates
 frames into a fixed `map` grid with a running-average cost and an
 observation count (confidence) per cell, and `terrain_node` publishes it on
 `/wiz/terrain/map`, placing each frame at the pose interpolated for its own
-timestamp (`PoseBuffer`). Still to do: publish confidence, and verify on real
-imagery.
+timestamp (`PoseBuffer`). Per-cell confidence (observation count scaled to
+0..100) is published on `/wiz/terrain/map_confidence`. Still to do: verify on
+real imagery.
 
 ## Candidate future sprints (order/scope not yet committed)
 - Simulation environment: Gazebo + ROS 2 Humble bring-up

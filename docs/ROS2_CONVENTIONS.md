@@ -87,6 +87,7 @@ All Wiz topics are namespaced under `/wiz/`:
 | `/wiz/vision/detections` | `wiz_interfaces/DetectionArray`     | reliable, depth 10 |
 | `/wiz/terrain/grid`      | `nav_msgs/OccupancyGrid`            | reliable, depth 10 |
 | `/wiz/terrain/map`       | `nav_msgs/OccupancyGrid`            | reliable, depth 10 |
+| `/wiz/terrain/map_confidence` | `nav_msgs/OccupancyGrid`       | reliable, depth 10 |
 | `/wiz/terrain/overlay`   | `sensor_msgs/Image` (bgr8)          | reliable, depth 10 |
 
 QoS is kept at simple reliable defaults for now. Revisit once real sensors
@@ -143,6 +144,13 @@ cell is the average cost of every frame that observed it:
 | `0`     | clear / low-cost terrain         |
 | `100`   | impassable / highest-cost terrain |
 | `-1`    | unknown                          |
+
+`/wiz/terrain/map_confidence` has the same layout as `/wiz/terrain/map`, but
+each value is how well observed the cell is, `0..100`:
+`100 * min(observations / map_confidence_full_at, 1)` (parameter default 10).
+Unseen cells are `0`. An observation is one frame cell landing in the map cell,
+so one frame can add several when map cells are larger than frame cells. It
+counts observations; it is not a probability that the cost is right.
 
 Nothing in Sprint 4 estimates the probability that a cell is occupied. The
 number answers "how hard would this be to cross", derived from image

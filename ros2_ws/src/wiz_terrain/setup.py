@@ -15,7 +15,7 @@ setup(
     zip_safe=True,
     maintainer='arnav',
     maintainer_email='arnavkatewale@gmail.com',
-    description='Single-frame camera-relative terrain analysis and traversability grid for the Wiz stack',
+    description='Camera terrain analysis: per-frame traversability grid and a pose-aware accumulated map with per-cell confidence for the Wiz stack',
     license='TBD',
     tests_require=['pytest'],
     entry_points={

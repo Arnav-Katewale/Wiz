@@ -233,6 +233,7 @@ def test_terrain_node_skips_map_until_pose_known():
 @pytest.mark.parametrize('name,ptype,value', [
     ('map_resolution_m', Parameter.Type.DOUBLE, 0.0),
     ('map_width_cells', Parameter.Type.INTEGER, 0),
+    ('map_confidence_full_at', Parameter.Type.INTEGER, 0),
 ])
 def test_terrain_node_refuses_invalid_map_parameters(name, ptype, value):
     rclpy.init()
@@ -240,4 +241,45 @@ def test_terrain_node_refuses_invalid_map_parameters(name, ptype, value):
         with pytest.raises(ValueError):
             TerrainNode(parameter_overrides=[Parameter(name, ptype, value)])
     finally:
+        rclpy.shutdown()
+
+
+def test_terrain_node_publishes_map_confidence():
+    """Confidence grows as frames repeat from one pose; unseen cells stay 0."""
+    rclpy.init()
+    camera = CameraNode()
+    terrain = TerrainNode(parameter_overrides=[
+        Parameter('map_confidence_full_at', Parameter.Type.INTEGER, 100),
+    ])
+    talker = Node('test_confidence_talker')
+    pub = talker.create_publisher(Telemetry, '/wiz/telemetry', 10)
+    received = []
+    talker.create_subscription(
+        OccupancyGrid, '/wiz/terrain/map_confidence', received.append, 10
+    )
+
+    def publish_and_check():
+        pub.publish(_telemetry(0.0, 0.0, 0.0))
+        return len(received) >= 5
+
+    try:
+        ok = _spin_until([camera, terrain, talker], publish_and_check, timeout_sec=12.0)
+        assert ok, 'not enough /wiz/terrain/map_confidence messages'
+        first, last = received[0], received[-1]
+        assert last.header.frame_id == 'map'
+        assert (last.info.width, last.info.height) == (200, 200)
+        assert all(0 <= v <= 100 for v in last.data)
+        # One frame can hit a map cell several times (map cells are larger
+        # than frame cells), so compare totals, not single cells.
+        assert sum(last.data) > sum(first.data)        # grows with repeat frames
+        assert last.data.count(0) > 0                  # most of the map is unseen
+        # Matches the observation counts the node holds.
+        obs = terrain.accumulated_map.observations.flatten()
+        for v, n in zip(last.data, obs):
+            if n == 0:
+                assert v == 0
+    finally:
+        camera.destroy_node()
+        terrain.destroy_node()
+        talker.destroy_node()
         rclpy.shutdown()

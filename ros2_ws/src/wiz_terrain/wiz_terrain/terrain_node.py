@@ -13,6 +13,12 @@ Subscribes to camera frames and publishes two grids:
   has no known pose (before the first telemetry, or telemetry gone quiet)
   are skipped for the map with a warning, because there is nowhere honest to
   put them.
+* ``/wiz/terrain/map_confidence``: same layout as the map, but each cell is
+  how well observed it is, ``0..100``: ``100 * min(observations /
+  map_confidence_full_at, 1)``. Unseen cells are ``0``. An observation is
+  one frame cell landing in the map cell, so one frame can add several when
+  map cells are larger than frame cells. This is a count of observations,
+  not a probability that the cost is correct.
 
 A message with an unset (zero) stamp is timed by when it arrived instead.
 
@@ -26,6 +32,7 @@ message that rviz2 renders natively, but its value range carries a
 """
 
 import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge, CvBridgeError
 from nav_msgs.msg import OccupancyGrid
@@ -90,6 +97,8 @@ class TerrainNode(Node):
         # and how long past the newest telemetry its pose may still be used.
         self.declare_parameter('pose_history_s', 2.0)
         self.declare_parameter('pose_hold_s', 0.2)
+        # Observations of a cell after which its confidence reads 100.
+        self.declare_parameter('map_confidence_full_at', 10)
 
         try:
             self._config = self._config_from_parameters()
@@ -106,6 +115,11 @@ class TerrainNode(Node):
                 max_history_s=float(get('pose_history_s')),
                 max_hold_s=float(get('pose_hold_s')),
             )
+            self._confidence_full_at = int(get('map_confidence_full_at'))
+            if self._confidence_full_at < 1:
+                raise ValueError(
+                    f'map_confidence_full_at must be >= 1, got {self._confidence_full_at}'
+                )
         except (ValueError, TypeError) as exc:
             self.get_logger().error(
                 f'invalid terrain parameters, refusing to start: {exc}'
@@ -130,6 +144,9 @@ class TerrainNode(Node):
         )
         self._grid_pub = self.create_publisher(OccupancyGrid, '/wiz/terrain/grid', 10)
         self._map_pub = self.create_publisher(OccupancyGrid, '/wiz/terrain/map', 10)
+        self._confidence_pub = self.create_publisher(
+            OccupancyGrid, '/wiz/terrain/map_confidence', 10
+        )
         self._overlay_pub = self.create_publisher(
             Image, '/wiz/terrain/overlay', 10
         )
@@ -295,19 +312,27 @@ class TerrainNode(Node):
             return
         self._map.integrate(result.grid, pose, result.cell_size_m)
 
-        data, width, height = self._map.to_occupancy()
-        map_msg = OccupancyGrid()
-        map_msg.header.stamp = source_msg.header.stamp
-        map_msg.header.frame_id = 'map'
-        map_msg.info.map_load_time = source_msg.header.stamp
-        map_msg.info.resolution = float(self._map.resolution_m)
-        map_msg.info.width = int(width)
-        map_msg.info.height = int(height)
-        map_msg.info.origin.position.x = float(self._map.origin_x)
-        map_msg.info.origin.position.y = float(self._map.origin_y)
-        map_msg.info.origin.orientation.w = 1.0
-        map_msg.data = data
-        self._map_pub.publish(map_msg)
+        data, _, _ = self._map.to_occupancy()
+        self._map_pub.publish(self._map_message(data, source_msg.header.stamp))
+        confidence = np.rint(self._map.confidence(self._confidence_full_at) * 100.0)
+        self._confidence_pub.publish(self._map_message(
+            confidence.astype(np.int8).flatten().tolist(), source_msg.header.stamp
+        ))
+
+    def _map_message(self, data, stamp) -> OccupancyGrid:
+        """An OccupancyGrid in the ``map`` frame with the accumulated map's layout."""
+        msg = OccupancyGrid()
+        msg.header.stamp = stamp
+        msg.header.frame_id = 'map'
+        msg.info.map_load_time = stamp
+        msg.info.resolution = float(self._map.resolution_m)
+        msg.info.width = int(self._map.width)
+        msg.info.height = int(self._map.height)
+        msg.info.origin.position.x = float(self._map.origin_x)
+        msg.info.origin.position.y = float(self._map.origin_y)
+        msg.info.origin.orientation.w = 1.0
+        msg.data = data
+        return msg
 
     @property
     def accumulated_map(self) -> AccumulatedMap:
