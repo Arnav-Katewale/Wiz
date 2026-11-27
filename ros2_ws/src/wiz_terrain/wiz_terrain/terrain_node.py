@@ -93,6 +93,9 @@ class TerrainNode(Node):
         self.declare_parameter('map_resolution_m', 0.15)
         self.declare_parameter('map_origin_x', -15.0)
         self.declare_parameter('map_origin_y', -15.0)
+        # Per-cell history cap: past this many observations new ones keep a
+        # weight of 1/(N+1), so the map can follow changes (map_grid.py).
+        self.declare_parameter('map_max_observations', 50)
         # How much telemetry history to keep for matching frame timestamps,
         # and how long past the newest telemetry its pose may still be used.
         self.declare_parameter('pose_history_s', 2.0)
@@ -110,6 +113,7 @@ class TerrainNode(Node):
                 resolution_m=float(get('map_resolution_m')),
                 origin_x=float(get('map_origin_x')),
                 origin_y=float(get('map_origin_y')),
+                max_observations=int(get('map_max_observations')),
             )
             self._poses = PoseBuffer(
                 max_history_s=float(get('pose_history_s')),
@@ -119,6 +123,11 @@ class TerrainNode(Node):
             if self._confidence_full_at < 1:
                 raise ValueError(
                     f'map_confidence_full_at must be >= 1, got {self._confidence_full_at}'
+                )
+            if self._confidence_full_at > self._map.max_observations:
+                raise ValueError(
+                    'map_confidence_full_at must not exceed map_max_observations, '
+                    'or confidence could never reach 100'
                 )
         except (ValueError, TypeError) as exc:
             self.get_logger().error(

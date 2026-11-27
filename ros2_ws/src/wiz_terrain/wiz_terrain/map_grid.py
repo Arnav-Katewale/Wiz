@@ -20,6 +20,15 @@ and its cost is added to the map cell containing that centre. Frame cells
 marked ``UNKNOWN`` add nothing, and centres outside the map are dropped. This
 nearest-cell scheme leaves gaps if the map is finer than the frame's cells,
 so choose ``resolution_m`` at least as large as the frame cell size.
+
+Following change: a plain average over every observation ever made barely
+moves once a cell has many of them, so something that changes (an object
+moved, a few bad early frames) would stay in the map. With
+``max_observations = N``, once a cell has more than N observations its cost
+sum is scaled by ``N / count`` and its count set back to N. The mean is
+unchanged by that scaling, and from then on each new observation ``c`` moves
+the mean by ``(c - mean) / (N + 1)``: a moving average that always gives new
+observations at least that weight. ``None`` keeps the plain average.
 """
 
 import math
@@ -34,13 +43,17 @@ class AccumulatedMap:
     """Running-average cost and observation count for a fixed map grid."""
 
     def __init__(self, width: int, height: int, resolution_m: float,
-                 origin_x: float = 0.0, origin_y: float = 0.0):
+                 origin_x: float = 0.0, origin_y: float = 0.0,
+                 max_observations=None):
         if width < 1 or height < 1:
             raise ValueError(f"map must be at least 1x1 cells, got {width}x{height}")
         if not (math.isfinite(resolution_m) and resolution_m > 0):
             raise ValueError(f"resolution_m must be a positive finite size, got {resolution_m}")
         if not (math.isfinite(origin_x) and math.isfinite(origin_y)):
             raise ValueError("map origin must be finite")
+        if max_observations is not None and max_observations < 1:
+            raise ValueError(f"max_observations must be >= 1, got {max_observations}")
+        self.max_observations = max_observations
         self.width = width
         self.height = height
         self.resolution_m = resolution_m
@@ -76,6 +89,11 @@ class AccumulatedMap:
         # both count.
         np.add.at(self._cost_sum, (iy[use], ix[use]), grid[use].astype(np.float64))
         np.add.at(self.observations, (iy[use], ix[use]), 1)
+        if self.max_observations is not None:
+            cap = self.max_observations
+            over = self.observations > cap
+            self._cost_sum[over] *= cap / self.observations[over]
+            self.observations[over] = cap
         return int(use.sum())
 
     def mean_cost(self) -> np.ndarray:

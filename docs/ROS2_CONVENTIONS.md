@@ -152,6 +152,11 @@ Unseen cells are `0`. An observation is one frame cell landing in the map cell,
 so one frame can add several when map cells are larger than frame cells. It
 counts observations; it is not a probability that the cost is right.
 
+Each cell keeps at most `map_max_observations` (default 50) observations of
+history. Past that, a new observation `c` moves the cell's cost by
+`(c - mean) / (map_max_observations + 1)`, so the map follows changes instead
+of averaging over all time. `map_confidence_full_at` must not exceed it.
+
 Nothing in Sprint 4 estimates the probability that a cell is occupied. The
 number answers "how hard would this be to cross", derived from image
 appearance alone.

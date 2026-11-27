@@ -234,6 +234,8 @@ def test_terrain_node_skips_map_until_pose_known():
     ('map_resolution_m', Parameter.Type.DOUBLE, 0.0),
     ('map_width_cells', Parameter.Type.INTEGER, 0),
     ('map_confidence_full_at', Parameter.Type.INTEGER, 0),
+    ('map_max_observations', Parameter.Type.INTEGER, 0),
+    ('map_max_observations', Parameter.Type.INTEGER, 5),  # below full_at 10
 ])
 def test_terrain_node_refuses_invalid_map_parameters(name, ptype, value):
     rclpy.init()
@@ -250,6 +252,7 @@ def test_terrain_node_publishes_map_confidence():
     camera = CameraNode()
     terrain = TerrainNode(parameter_overrides=[
         Parameter('map_confidence_full_at', Parameter.Type.INTEGER, 100),
+        Parameter('map_max_observations', Parameter.Type.INTEGER, 100),
     ])
     talker = Node('test_confidence_talker')
     pub = talker.create_publisher(Telemetry, '/wiz/telemetry', 10)

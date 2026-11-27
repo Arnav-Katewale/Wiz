@@ -99,3 +99,47 @@ def test_invalid_map_rejected(bad):
 def test_out_of_range_cost_rejected():
     with pytest.raises(ValueError):
         _map().integrate(np.array([[101]], dtype=np.int16), ORIGIN, cell_m=1.0)
+
+
+def _observe(m, cost):
+    m.integrate(np.array([[cost]], dtype=np.int16), ORIGIN, cell_m=1.0)
+    return m.cell_index(0.5, 0.0)
+
+
+def test_history_cap_does_nothing_below_the_cap():
+    m = _map(max_observations=4)
+    for cost in (10, 20, 30, 40):
+        iy, ix = _observe(m, cost)
+    assert m.observations[iy, ix] == 4
+    assert m.mean_cost()[iy, ix] == 25
+
+
+def test_history_cap_keeps_the_mean_and_weighs_new_observations():
+    m = _map(max_observations=4)
+    for _ in range(4):
+        iy, ix = _observe(m, 0)
+    # By hand: mean moves by (c - mean) / (N + 1) = (100 - 0) / 5 = 20,
+    # then (100 - 20) / 5 = 16 -> 36.
+    _observe(m, 100)
+    assert m.observations[iy, ix] == 4
+    assert m.mean_cost()[iy, ix] == 20
+    _observe(m, 100)
+    assert m.mean_cost()[iy, ix] == 36
+
+
+def test_capped_map_follows_a_change_uncapped_map_does_not():
+    capped, plain = _map(max_observations=5), _map()
+    for _ in range(100):
+        iy, ix = _observe(capped, 0)
+        _observe(plain, 0)
+    for _ in range(20):          # the terrain changes to impassable
+        _observe(capped, 100)
+        _observe(plain, 100)
+    assert plain.mean_cost()[iy, ix] == 17        # 2000 / 120, still looks clear
+    assert capped.mean_cost()[iy, ix] >= 95       # 100 * (1 - (5/6)**20) ~ 97
+
+
+@pytest.mark.parametrize('cap', [0, -3])
+def test_invalid_history_cap_rejected(cap):
+    with pytest.raises(ValueError):
+        _map(max_observations=cap)
