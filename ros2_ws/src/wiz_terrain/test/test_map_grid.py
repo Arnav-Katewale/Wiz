@@ -143,3 +143,38 @@ def test_capped_map_follows_a_change_uncapped_map_does_not():
 def test_invalid_history_cap_rejected(cap):
     with pytest.raises(ValueError):
         _map(max_observations=cap)
+
+
+def test_save_and_restore_round_trip(tmp_path):
+    m = _map(max_observations=50)
+    m.integrate(np.array([[10, 90], [UNKNOWN, 40]], dtype=np.int16), ORIGIN, cell_m=1.0)
+    m.integrate(np.array([[30]], dtype=np.int16), Pose2D(3.0, 1.0, 0.7), cell_m=1.0)
+    path = str(tmp_path / 'map.npz')
+    m.save(path)
+    restored = _map(max_observations=50)
+    restored.restore(path)
+    assert np.array_equal(restored.observations, m.observations)
+    assert np.array_equal(restored.mean_cost(), m.mean_cost())
+    assert not (tmp_path / 'map.npz.tmp').exists()
+
+
+@pytest.mark.parametrize('change', [
+    dict(width=11), dict(resolution_m=0.5), dict(origin_x=1.0),
+])
+def test_restore_refuses_a_different_layout(tmp_path, change):
+    path = str(tmp_path / 'map.npz')
+    _map().save(path)
+    with pytest.raises(ValueError, match='layout'):
+        _map(**change).restore(path)
+
+
+def test_restore_applies_this_maps_history_cap(tmp_path):
+    m = _map()
+    for _ in range(10):
+        iy, ix = _observe(m, 40)
+    path = str(tmp_path / 'map.npz')
+    m.save(path)
+    capped = _map(max_observations=4)
+    capped.restore(path)
+    assert capped.observations[iy, ix] == 4
+    assert capped.mean_cost()[iy, ix] == 40

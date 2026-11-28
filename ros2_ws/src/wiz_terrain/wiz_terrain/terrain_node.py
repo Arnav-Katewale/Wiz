@@ -31,6 +31,8 @@ message that rviz2 renders natively, but its value range carries a
 * ``-1``  -- unknown
 """
 
+import os
+
 import cv2
 import numpy as np
 import rclpy
@@ -102,6 +104,10 @@ class TerrainNode(Node):
         self.declare_parameter('pose_hold_s', 0.2)
         # Observations of a cell after which its confidence reads 100.
         self.declare_parameter('map_confidence_full_at', 10)
+        # Map persistence (empty = off): restore at start, save at shutdown.
+        # A missing load file just means an empty map (e.g. the first run).
+        self.declare_parameter('map_load_path', '')
+        self.declare_parameter('map_save_path', '')
 
         try:
             self._config = self._config_from_parameters()
@@ -129,7 +135,17 @@ class TerrainNode(Node):
                     'map_confidence_full_at must not exceed map_max_observations, '
                     'or confidence could never reach 100'
                 )
-        except (ValueError, TypeError) as exc:
+            self._map_save_path = str(get('map_save_path'))
+            load_path = str(get('map_load_path'))
+            if load_path and os.path.exists(load_path):
+                self._map.restore(load_path)
+                self.get_logger().info(
+                    f'restored terrain map from {load_path} '
+                    f'({int((self._map.observations > 0).sum())} observed cells)'
+                )
+            elif load_path:
+                self.get_logger().warn(f'no saved map at {load_path}; starting empty')
+        except (ValueError, TypeError, OSError, KeyError) as exc:
             self.get_logger().error(
                 f'invalid terrain parameters, refusing to start: {exc}'
             )
@@ -361,6 +377,12 @@ class TerrainNode(Node):
             f'terrain_node shutting down after {self._frames_processed} frames '
             f'processed, {self._frames_rejected} rejected'
         )
+        if self._map_save_path:
+            try:
+                self._map.save(self._map_save_path)
+                self.get_logger().info(f'saved terrain map to {self._map_save_path}')
+            except OSError as exc:
+                self.get_logger().error(f'could not save terrain map: {exc}')
         super().destroy_node()
 
 

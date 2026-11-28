@@ -29,9 +29,17 @@ sum is scaled by ``N / count`` and its count set back to N. The mean is
 unchanged by that scaling, and from then on each new observation ``c`` moves
 the mean by ``(c - mean) / (N + 1)``: a moving average that always gives new
 observations at least that weight. ``None`` keeps the plain average.
+
+Persistence: ``save(path)`` writes the cost sums, observation counts and the
+map layout to a NumPy ``.npz`` file (written to a temporary file first and
+then renamed, so a crash mid-save never leaves a half-written map).
+``restore(path)`` loads one back into a map with the *same layout*; a file
+made for a different size, resolution or origin is refused, because its
+cells would land in the wrong places.
 """
 
 import math
+import os
 
 import numpy as np
 
@@ -89,12 +97,52 @@ class AccumulatedMap:
         # both count.
         np.add.at(self._cost_sum, (iy[use], ix[use]), grid[use].astype(np.float64))
         np.add.at(self.observations, (iy[use], ix[use]), 1)
-        if self.max_observations is not None:
-            cap = self.max_observations
-            over = self.observations > cap
-            self._cost_sum[over] *= cap / self.observations[over]
-            self.observations[over] = cap
+        self._apply_cap()
         return int(use.sum())
+
+    def _apply_cap(self) -> None:
+        """Scale cells over ``max_observations`` back to it, keeping their mean."""
+        if self.max_observations is None:
+            return
+        cap = self.max_observations
+        over = self.observations > cap
+        self._cost_sum[over] *= cap / self.observations[over]
+        self.observations[over] = cap
+
+    def _layout(self):
+        return (self.width, self.height, self.resolution_m, self.origin_x, self.origin_y)
+
+    def save(self, path: str) -> None:
+        """Write the map to ``path`` (an ``.npz`` file), atomically."""
+        tmp = f'{path}.tmp'
+        with open(tmp, 'wb') as f:
+            np.savez(f, cost_sum=self._cost_sum, observations=self.observations,
+                     layout=np.array(self._layout(), dtype=np.float64))
+        os.replace(tmp, path)
+
+    def restore(self, path: str) -> None:
+        """Replace this map's contents with a map saved by ``save``.
+
+        Raises ``ValueError`` if the file's layout differs from this map's,
+        or its arrays are inconsistent. This map's own ``max_observations``
+        is applied to the loaded counts.
+        """
+        with np.load(path) as f:
+            layout = tuple(f['layout'].tolist())
+            cost_sum = f['cost_sum'].astype(np.float64)
+            observations = f['observations'].astype(np.int64)
+        mine = self._layout()
+        if len(layout) != len(mine) or not np.allclose(layout, mine, rtol=0, atol=1e-9):
+            raise ValueError(
+                f'saved map layout (width, height, resolution, origin_x, origin_y) '
+                f'{layout} does not match this map {mine}'
+            )
+        shape = (self.height, self.width)
+        if cost_sum.shape != shape or observations.shape != shape or np.any(observations < 0):
+            raise ValueError('saved map arrays are inconsistent with its layout')
+        self._cost_sum = cost_sum
+        self.observations = observations
+        self._apply_cap()
 
     def mean_cost(self) -> np.ndarray:
         """Average cost per cell as ``int16``; ``UNKNOWN`` where never observed."""

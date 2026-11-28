@@ -157,6 +157,11 @@ history. Past that, a new observation `c` moves the cell's cost by
 `(c - mean) / (map_max_observations + 1)`, so the map follows changes instead
 of averaging over all time. `map_confidence_full_at` must not exceed it.
 
+The map can survive restarts: with `map_save_path` set, `terrain_node` writes
+it to that `.npz` file at shutdown; with `map_load_path` set, it restores it at
+startup. A saved map with a different size, resolution or origin is refused
+(the node will not start), and a missing load file starts an empty map.
+
 Nothing in Sprint 4 estimates the probability that a cell is occupied. The
 number answers "how hard would this be to cross", derived from image
 appearance alone.

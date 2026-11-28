@@ -41,8 +41,9 @@ observation count (confidence) per cell, and `terrain_node` publishes it on
 `/wiz/terrain/map`, placing each frame at the pose interpolated for its own
 timestamp (`PoseBuffer`). Per-cell confidence (observation count scaled to
 0..100) is published on `/wiz/terrain/map_confidence`. Each cell keeps a capped
-history (`map_max_observations`), so the map follows changes. Still to do:
-verify on real imagery.
+history (`map_max_observations`), so the map follows changes, and the map can
+be saved at shutdown and restored at startup. Still to do: verify on real
+imagery.
 
 ## Candidate future sprints (order/scope not yet committed)
 - Simulation environment: Gazebo + ROS 2 Humble bring-up

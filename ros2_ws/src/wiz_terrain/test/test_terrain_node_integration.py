@@ -8,6 +8,7 @@ quality on real imagery.
 import math
 import time
 
+import numpy as np
 import pytest
 import rclpy
 from nav_msgs.msg import OccupancyGrid
@@ -285,4 +286,58 @@ def test_terrain_node_publishes_map_confidence():
         camera.destroy_node()
         terrain.destroy_node()
         talker.destroy_node()
+        rclpy.shutdown()
+
+
+def test_terrain_node_saves_map_at_shutdown_and_restores_it(tmp_path):
+    """A node with map_save_path writes its map on shutdown; a new node loads it."""
+    path = str(tmp_path / 'terrain_map.npz')
+    rclpy.init()
+    camera = CameraNode()
+    terrain = TerrainNode(parameter_overrides=[
+        Parameter('map_save_path', Parameter.Type.STRING, path),
+    ])
+    talker = Node('test_save_talker')
+    pub = talker.create_publisher(Telemetry, '/wiz/telemetry', 10)
+
+    def publish_and_check():
+        pub.publish(_telemetry(1.0, 2.0, 0.3))
+        return terrain.accumulated_map.observations.sum() > 0
+
+    try:
+        assert _spin_until([camera, terrain, talker], publish_and_check, timeout_sec=10.0)
+    finally:
+        camera.destroy_node()
+        talker.destroy_node()
+        terrain.destroy_node()        # saves here
+        saved_obs = terrain.accumulated_map.observations.copy()
+        saved_cost = terrain.accumulated_map.mean_cost()
+        rclpy.shutdown()
+
+    rclpy.init()
+    try:
+        reloaded = TerrainNode(parameter_overrides=[
+            Parameter('map_load_path', Parameter.Type.STRING, path),
+        ])
+        assert np.array_equal(reloaded.accumulated_map.observations, saved_obs)
+        assert np.array_equal(reloaded.accumulated_map.mean_cost(), saved_cost)
+        reloaded.destroy_node()
+        with pytest.raises(ValueError):    # same file, different map size
+            TerrainNode(parameter_overrides=[
+                Parameter('map_load_path', Parameter.Type.STRING, path),
+                Parameter('map_width_cells', Parameter.Type.INTEGER, 100),
+            ])
+    finally:
+        rclpy.shutdown()
+
+
+def test_terrain_node_starts_empty_when_load_file_is_missing(tmp_path):
+    rclpy.init()
+    try:
+        node = TerrainNode(parameter_overrides=[
+            Parameter('map_load_path', Parameter.Type.STRING, str(tmp_path / 'none.npz')),
+        ])
+        assert node.accumulated_map.observations.sum() == 0
+        node.destroy_node()
+    finally:
         rclpy.shutdown()
